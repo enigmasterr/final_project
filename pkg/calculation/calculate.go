@@ -2,12 +2,9 @@ package calculation
 
 import (
 	"strings"
-
-	"github.com/enigmasterr/final_project/pkg/calculation"
 )
 
-func Calc(expression string) ([]string, error) {
-
+func Get_expression(expression string) ([]string, error) {
 	prior := map[string]int{
 		"(": 0,
 		")": 1,
@@ -28,7 +25,7 @@ func Calc(expression string) ([]string, error) {
 		}
 	}
 	if strange {
-		return []string{}, calculation.ErrStrangeSymbols
+		return []string{}, ErrStrangeSymbols
 	}
 	for _, sim := range expression {
 		if sim == '(' {
@@ -76,12 +73,11 @@ func Calc(expression string) ([]string, error) {
 	}
 	for len(st) > 0 {
 		if st[len(st)-1] == "(" || st[len(st)-1] == ")" {
-			return []string{}, calculation.ErrInvalidExpression
+			return []string{}, ErrInvalidExpression
 		} else {
 			ans = append(ans, st[len(st)-1])
 			st = st[:len(st)-1]
 		}
 	}
-
 	return ans, nil
 }

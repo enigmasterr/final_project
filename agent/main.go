@@ -37,20 +37,19 @@ func getTask() (*TaskF, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		if resp.StatusCode == http.StatusNotFound {
-			log.Println("Задача не найдена.")
+			return nil, fmt.Errorf("task not found")
 		} else {
-			log.Printf("Unexpected status code: %d\n", resp.StatusCode)
+			return nil, fmt.Errorf("some trouble with status: %d", resp.StatusCode)
 		}
 	}
-
 	var task TaskF
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Printf("Error reading response body: %v\n", err)
+		return nil, fmt.Errorf("error reading response body")
 	}
 
 	if err = json.Unmarshal(data, &task); err != nil {
-		log.Printf("Error unmarshaling JSON: %v\n", err)
+		return nil, fmt.Errorf("error unmarshaling json")
 	}
 	return &task, nil
 }
@@ -87,7 +86,7 @@ func sendResult(res float64, id int) error {
 	ans := jsonData{ID: id, Result: res}
 	data, err := json.Marshal(ans)
 	if err != nil {
-		return fmt.Errorf("failed to marshal task: %v", err)
+		return fmt.Errorf("failed to marshal task: %v with data - %v", err, ans)
 	}
 	_, err = http.Post(fmt.Sprintf("http://localhost:%v/internal/task", PORT), "application/json", bytes.NewBuffer(data))
 	if err != nil {
@@ -115,20 +114,20 @@ func main() {
 			defer wg.Done()
 			for {
 				task, err := getTask()
+
 				if err != nil {
 					fmt.Errorf("Some trouble getting task")
-				}
-				if task != nil {
-					log.Printf("Данные от оркестратора получены: %+v\n", task)
-					res := computeTask(task)
-					log.Printf("Получен результат работы операции: %+v\n", res)
-					err := sendResult(res, task.ID)
-					if err != nil {
-						fmt.Printf("Some problem occured in sending %v", err)
-					}
-					log.Println("Результат операции отравлен оркестратору!")
 				} else {
-					log.Printf("Worker dont get any task(((")
+					if task != nil {
+						log.Printf("Данные от оркестратора получены: %+v\n", task)
+						res := computeTask(task)
+						// log.Printf("Получен результат работы операции: %+v\n", res)
+						err := sendResult(res, task.ID)
+						if err != nil {
+							fmt.Printf("Some problem occured in sending %v", err)
+						}
+						log.Printf("Результат операции ID:%d, result: %.2f отравлен оркестратору!", task.ID, res)
+					}
 				}
 			}
 		}()
