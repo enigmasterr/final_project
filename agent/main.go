@@ -108,6 +108,7 @@ func main() {
 		compPower = 2
 	}
 	PORT = os.Getenv("PORT")
+	fmt.Printf("Агент успешно запущен!\n")
 	for i := 0; i < compPower; i++ {
 		wg.Add(1)
 		go func() {

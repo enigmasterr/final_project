@@ -9,7 +9,7 @@ require (
 
 require github.com/golang-jwt/jwt/v5 v5.2.2
 
-require github.com/mattn/go-sqlite3 v1.14.28
+require modernc.org/sqlite v1.37.0
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
@@ -22,5 +22,4 @@ require (
 	modernc.org/libc v1.62.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.9.1 // indirect
-	modernc.org/sqlite v1.37.0 // indirect
 )

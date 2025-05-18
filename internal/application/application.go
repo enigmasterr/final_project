@@ -1,7 +1,6 @@
 package application
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -13,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/enigmasterr/final_project/internal/database"
 	"github.com/enigmasterr/final_project/pkg/calculation"
 	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
@@ -24,6 +24,7 @@ type Config struct {
 }
 
 var PORT string
+var CURRENTUSER int
 
 func ConfigFromEnv() *Config {
 	err := godotenv.Load()
@@ -79,6 +80,8 @@ func New() *Application {
 // 	}
 // }
 
+var DB *sql.DB
+
 type TaskF struct {
 	ID             int     `json:"id"`
 	Arg1           float64 `json:"arg1"`
@@ -86,8 +89,16 @@ type TaskF struct {
 	Operation      string  `json:"operation"`
 	Operation_time int     `json:"operation_time"`
 }
+
 type Task struct {
 	Task TaskF `json:"task"`
+}
+
+type ErrorJSON struct {
+	Error string `json:"error"`
+}
+type MessageJSON struct {
+	Message string `json:"message"`
 }
 
 var allTasks = map[int]TaskF{}
@@ -99,6 +110,9 @@ func Calc(expression string, id int) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
+	//Будем добавлять в БД только выражения, которые валидные
+	Exp := database.Expression{ID: id, User_id: 1, Expression: expression, Result: 0}
+	database.AddExpression(DB, &Exp)
 
 	fmt.Printf("TEST! %v\n", ans)
 	var stk []float64
@@ -201,6 +215,14 @@ func addAnswer(expr expressionJSON) {
 }
 
 func CalcHandler(w http.ResponseWriter, r *http.Request) {
+	user, _ := database.GetUserID(DB, CURRENTUSER)
+	if user == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(ErrorJSON{Error: "Запросы могут делать только авторизованные пользователи."})
+		log.Print("Пользователь не зарегистрирован.\n")
+		return
+	}
 	var mu sync.Mutex
 	mu.Lock()
 	curID++
@@ -247,6 +269,7 @@ func CalcHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 	} else {
+		database.UpdateExpression(DB, curID, result)
 		newExpres := expressionJSON{ID: curID, Status: http.StatusOK, Result: result}
 		addAnswer(newExpres)
 		log.Printf("send json {\"result\": \"%s\"}", string(fmt.Sprintf("%d", curID)))
@@ -353,22 +376,72 @@ func GetResultOperation(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func test() {
-	ctx := context.TODO()
+type LoginStr struct {
+	Login    string `json:"login"`
+	Password string `json:"password"`
+}
 
-	db, err := sql.Open("sqlite", "file:/internal/db/store.db?cache=shared")
+func RegisterHandler(w http.ResponseWriter, r *http.Request) {
+	var data LoginStr
+	err := json.NewDecoder(r.Body).Decode(&data)
 	if err != nil {
-		panic(err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
-	defer db.Close()
 
-	err = db.PingContext(ctx)
-	if err != nil {
-		panic(err)
+	user, _ := database.GetUser(DB, data.Login)
+	if user != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(ErrorJSON{Error: "Ошибка регистрации. Пользователь с таким логином уже есть."})
+		log.Printf("Ошибка регистрации. Пользователь %s уже зарегистрирован.\n", data.Login)
+		return
 	}
+	database.AddUser(DB, data.Login, data.Password)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(MessageJSON{Message: "Пользователь успешно зарегистрирован"})
+	log.Printf("Пользователь регистрируется: %+v\n", LoginStr{Login: data.Login, Password: "******"})
+}
+
+func LoginHandler(w http.ResponseWriter, r *http.Request) {
+	var data LoginStr
+	err := json.NewDecoder(r.Body).Decode(&data)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	user, _ := database.GetUser(DB, data.Login)
+	if user == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(ErrorJSON{Error: "Ошибка авторизации. Пользователь с таким логином отсутствует."})
+		log.Printf("Ошибка авторизации. Пользователь %s не зарегистрирован.\n", data.Login)
+		return
+	}
+	if user.Password != data.Password {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(ErrorJSON{Error: "Ошибка авторизации. Пароли не совпадают."})
+		log.Printf("Ошибка авторизации. Пользователь %s введ неверный пароль.\n", data.Login)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(MessageJSON{Message: "Пользователь успешно авторизован."})
+	CURRENTUSER = user.ID
+	log.Printf("Пользователь авторизован: %+v\n", LoginStr{Login: data.Login, Password: "******"})
+}
+
+func Init() {
+	CURRENTUSER = -9999
+	DB, _ = database.InitDB()
+	database.CreateTable(DB)
 }
 
 func (a *Application) RunServer() error {
+	Init()
 	router := mux.NewRouter()
 	router.HandleFunc("/api/v1/calculate", CalcHandler).Methods("GET", "POST")
 	router.HandleFunc("/api/v1/expressions", ExprHandler).Methods("GET")
@@ -376,7 +449,26 @@ func (a *Application) RunServer() error {
 	router.HandleFunc("/internal/task", TaskHandlerGET).Methods("GET")
 	router.HandleFunc("/internal/task", TaskHandlerPOST).Methods("POST")
 	router.HandleFunc("/internal/getresult/{id}", GetResultOperation).Methods("GET")
-	fmt.Println("Calculator is ready!")
-	test()
+	router.HandleFunc("/api/v1/register", RegisterHandler).Methods("POST") // { "login": , "password": }")
+	router.HandleFunc("/api/v1/login", LoginHandler).Methods("POST")       // { "login": , "password": }")
+
+	// db.Exec("INSERT INTO users (id, login, password) VALUES (?, ?, ?)", 1, "nigma", "hard")
+	// fmt.Println("Calculator is ready!")
+	// createTables := `
+	//     CREATE TABLE IF NOT EXISTS users (
+	//         id INTEGER PRIMARY KEY AUTOINCREMENT,
+	//         login TEXT NOT NULL UNIQUE,
+	//         password TEXT NOT NULL
+	//     );`
+
+	// if _, err := db.Exec(createTables); err != nil {
+	// 	log.Fatal("Failed to create tables:", err)
+	// }
+	// database.CreateTable(DB)
+	// database.AddUser(DB, "first33", "nopass")
+	// Exp := database.Expression{ID: curID, User_id: 2, Expression: "(3+7)*2", Result: 0}
+	// database.AddExpression(DB, &Exp)
+	// database.UpdateExpression(DB, 0, 20)
+	fmt.Printf("Калькулятор запущен! Можно перейти к вычислениям.\n")
 	return http.ListenAndServe(":"+a.config.Addr, router)
 }
